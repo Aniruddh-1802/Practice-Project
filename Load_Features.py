@@ -1,18 +1,31 @@
 import pandas as pd
 from sqlalchemy import create_engine
+from scripts.customer_cleaner import CustomerCleaner
 
-# Read CSV
-df = pd.read_csv("C:/Users/aniruddh.singh/OneDrive - Prodapt Solutions Private Limited/Documents/Project_prac/customer_features.csv")
+# Use the original file location if available; otherwise this script can be adjusted to point elsewhere
+raw_csv = r"C:/Users/aniruddh.singh/OneDrive - Prodapt Solutions Private Limited/Documents/Project_prac/customer_features.csv"
 
-# Handle blank TotalCharges values
-df["TotalCharges"] = pd.to_numeric(df["TotalCharges"], errors="coerce")
+# If you want to regenerate features from the raw churn CSV, uncomment and point to the raw CSV
+# from scripts.customer_cleaner import CustomerCleaner
+# cleaner = CustomerCleaner.from_csv(<raw_csv_path>)
+# df = cleaner.clean()
 
-# SQL Server connection
+# Otherwise try to read the provided customer_features.csv
+try:
+    df = pd.read_csv(raw_csv)
+except FileNotFoundError:
+    raise
+
+# Ensure TotalCharges numeric
+if "TotalCharges" in df.columns:
+    df["TotalCharges"] = pd.to_numeric(df["TotalCharges"], errors="coerce")
+
+# SQL Server connection (left unchanged)
 engine = create_engine(
     'mysql+pymysql://root:root@localhost:3306/project1'
 )
 
-# Load data
+# Load data into 'customer_features' table
 df.to_sql(
     "customer_features",
     con=engine,
