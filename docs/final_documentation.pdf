@@ -1,0 +1,277 @@
+Final Report — Customer Intelligence Labs
+
+Repository: Aniruddh-1802/Practice-Project
+Branch: ci-lab/finalize
+Author: GitHub Copilot (edits by repository owner)
+Date: 2026-08-17
+
+Executive summary
+-----------------
+This document is a complete, professional, phase-by-phase report for the Customer Intelligence Labs project in this repository. It documents objectives, design decisions, implementation details, commands to reproduce outputs, locations of supporting files, and placeholders for screenshots you will insert. Phase 4 (React frontend) was intentionally excluded per project instructions.
+
+Table of contents
+-----------------
+1. Background and scope
+2. Data sources and repository layout
+3. Phase 1 — Data engineering & ingestion
+4. Phase 2 — Exploration & feature engineering
+5. Phase 3 — Modeling, evaluation and model usage
+6. Phase 4 — Frontend (skipped)
+7. Phase 5 — Delivery, tests and documentation
+8. Operational considerations and known issues
+9. How to reproduce outputs (commands)
+10. Appendices: file map, changelog pointers
+
+1. Background and scope
+-----------------------
+Goal
+- Build a reproducible churn analysis and scoring pipeline from raw Telco churn data through feature engineering, model training, and an API for scoring.
+
+Scope
+- All phases of the Customer Intelligence Labs workflow were addressed except Phase 4 (React). The work added a reusable cleaner, integrated ingestion scripts, improved the API to load models at runtime, aligned ORM types for numeric columns, added a unit test for the cleaner, and produced comprehensive documentation.
+
+Constraints
+- You requested the repository remain runnable on your local machine as-is. I did not change environment variables or the existing database connection string. I did make Python-level changes (ORM types, routing logic, new modules) that require local re-import or minor DB updates if your local schema differs.
+
+2. Data sources and repository layout
+-------------------------------------
+Primary data files (in repository root)
+- WA_Fn-UseC_-Telco-Customer-Churn(in).csv — original Telco churn dataset (Kaggle source referenced in lab PDF)
+- telecom_churn.csv — alternate copy
+- customer_features.csv — derived feature file (existing)
+
+Important code and artifacts
+- scripts/customer_cleaner.py — new: reusable data cleaner and small CLI
+- load.py — modified to use the cleaner and write table `main1`
+- Load_Features.py — updated to ensure numeric TotalCharges and write `customer_features`
+- sql_tables.py — ORM definitions (MonthlyCharges and TotalCharges set to Float)
+- routers.py — FastAPI routes; model loader enhanced to scan models/ for .joblib/.pkl
+- main.py — FastAPI entrypoint (unchanged except routing inclusion)
+- models/ — trained model artifacts (logistic_churn.pkl, tree_churn.pkl present)
+- docs/ — final documentation and screenshots placeholders
+- tests/test_customer_cleaner.py — small unit test for cleaner
+
+3. Phase 1 — Data engineering & ingestion
+----------------------------------------
+Objective
+- Produce a canonical cleaned data table (staging) suitable for feature engineering and downstream analytics.
+
+Why we did it
+- The raw Telco CSV contains inconsistent types for numeric fields and some empty/blank values that must be normalized before aggregation, modeling, and DB ingestion.
+- A reusable cleaner centralizes the rules (coercion, imputation, derived fields) so notebooks and scripts produce consistent datasets.
+
+What I implemented
+- scripts/customer_cleaner.py — new module implementing CustomerCleaner with the following responsibilities:
+  - Load CSV and standardize column names
+  - Coerce MonthlyCharges and TotalCharges to numeric (float)
+  - Impute missing TotalCharges: for tenure == 0 set to MonthlyCharges (or 0), otherwise approximate by MonthlyCharges * tenure for missing values
+  - Derive churn_flag (1/0), per-service flags (OnlineSecurity_flag etc.), service_count (sum of flags), tenure_bucket categorical feature
+  - Export cleaned CSV (to_csv) and load into DB (to_sql), with default staging table name `main1`
+
+Key file mapping & code locations
+- Cleaner: scripts/customer_cleaner.py
+- Ingest script (modified): load.py (now uses CustomerCleaner and writes to `main1`)
+
+How to run (commands)
+- Clean the raw CSV and write CSV:
+  python scripts/customer_cleaner.py --input "WA_Fn-UseC_-Telco-Customer-Churn(in).csv" --output data/cleaned_customer.csv
+
+- Load cleaned data into the staging table `main1`:
+  python load.py
+
+Output and evidence
+- data/cleaned_customer.csv — cleaned artifact (generate locally)
+- Database table `main1` — staging table with numeric MonthlyCharges and TotalCharges
+- Notebook evidence: DataEngineering.ipynb shows head and data summary
+
+Screenshot placeholder (insert after running the commands)
+- docs/screenshots/phase1_cleaned_head.png — first 10 rows of the cleaned CSV or notebook cell
+
+Questions & caveats
+- Changing ORM types (to Float) does not alter your local DB; if existing tables were created with text columns, you should re-import or run an ALTER TABLE to convert types before performing numeric aggregates.
+- load.py was updated to write to `main1` (lowercase) to match the ORM. If you previously wrote to `Main1`, please drop or rename the old table.
+
+4. Phase 2 — Exploration & feature engineering
+----------------------------------------------
+Objective
+- Explore data distributions, missingness, and create derived features required by the model and business logic.
+
+Why we did it
+- EDA reveals variable distributions and relationships with churn, and feature engineering encodes domain knowledge (e.g., tenure buckets, streaming bundle flag) that improves model signal.
+
+What was implemented (or exists)
+- Notebooks: DataAnalyzing.ipynb (EDA) and FeatureEngineering.ipynb (feature construction) — kept in the repo and produce plots and aggregated summaries.
+- scripts/Load_Features.py modified to ensure TotalCharges numeric and to write features to `customer_features` table.
+
+Derived features created (examples)
+- churn_flag — binary target derived from Churn
+- service_count — count of positive binary service flags (PhoneService, OnlineSecurity, etc.)
+- tenure_bucket — categorical binning of tenure
+- online_service flags — boolean flags converted to 0/1 to simplify modeling
+
+How to run
+- Open and step through FeatureEngineering.ipynb to regenerate customer_features.csv, or run the Load_Features.py which expects an existing customer_features.csv or pre-cleaned input.
+  python Load_Features.py
+
+Outputs and evidence
+- customer_features.csv — derived features
+- DB table: customer_features
+- Notebook outputs: histograms, churn rates per bucket, correlation tables
+
+Screenshot placeholders
+- docs/screenshots/phase2_feature_preview.png — snippet of customer_features.csv showing derived columns
+- docs/screenshots/phase2_eda_plot.png — sample EDA plot (distribution or churn by bucket)
+
+Implementation notes
+- FeatureEngineering.ipynb contains the logic used to compute feature_count and flags. The cleaner produces consistent input types so the feature script can run deterministically.
+
+5. Phase 3 — Modeling, evaluation & model usage
+-----------------------------------------------
+Objective
+- Train and evaluate one or more models for churn prediction and provide a way to score new records via API.
+
+Why we did it
+- To provide a reproducible modeling pipeline and a deployable scoring interface that downstream systems or a frontend can call.
+
+Modeling artifacts and location
+- ML notebooks: ML_prep.ipynb (data prep and training) and UsingModel.ipynb (example usage)
+- models/: contains trained artifacts (examples in repo: logistic_churn.pkl, tree_churn.pkl). These are pickled scikit-learn estimators saved from notebooks.
+- routers.py: exposes POST /customer/predict_churn and other endpoints for summary and high-risk customer listing.
+
+Model training summary (recommended steps)
+- Use cleaned features from Phase 2
+- Split into train/test (e.g., 80/20), use stratification on churn_flag due to class imbalance
+- Evaluate using metrics appropriate to business: AUC-ROC, Precision-Recall, confusion matrix, and a calibration check
+- Persist model artifact with joblib (preferred) or pickle when acceptable
+
+Model card (brief)
+- Model type: scikit-learn estimator (check models/ for specific type)
+- Input schema expected by API (ChurnPredictionRequest):
+  - tenure (int)
+  - monthly_charges (float)
+  - contract (str) — API converts contract string into a contract_flag (month-to-month -> 1 else 0)
+  - service_count (int)
+- Output: JSON containing risk_score (probability), prediction (Likely to churn / Unlikely to churn)
+- Performance: See ML_prep.ipynb for measured metrics. (Include screenshots of the evaluation section in docs/screenshots/phase3_model_metrics.png)
+
+Model usage via API
+- Start API: uvicorn main:app --reload
+- Secure header: x-api-key: Aniruddh (verify_api_key is a simple header check in routers.py)
+- Example scoring request (curl):
+  curl -X POST "http://127.0.0.1:8000/customer/predict_churn" \
+    -H "Content-Type: application/json" -H "x-api-key: Aniruddh" \
+    -d '{"tenure":12,"monthly_charges":70.0,"contract":"Month-to-month","service_count":3}'
+
+How the API loads models
+- The routers.py model loader scans models/ for common file types (.joblib, .pkl, .pickle). It attempts joblib.load first, and then pickle.load as fallback.
+- If a loaded model provides predict_proba, the API uses the positive-class probability as the risk_score; otherwise it uses predict.
+- If no model loads successfully, the endpoint returns a documented stub response. This design allows keeping model artifacts in models/ without changing environment variables.
+
+Screenshot placeholders
+- docs/screenshots/phase3_model_metrics.png — evaluation outputs (ROC, confusion matrix)
+- docs/screenshots/phase3_predict_response.png — API JSON example
+
+Notes and recommendations
+- For production readiness, consider:
+  - Adding versioning to model artifacts (e.g., models/{model-name}-v1.joblib)
+  - A small model card (models/MODEL_CARD.md) describing feature order and preprocessing required
+  - Use joblib over pickle for scikit-learn models and track dependencies (scikit-learn version)
+
+6. Phase 4 — Frontend (React) — SKIPPED
+-------------------------------------
+Status: Skipped (per project instructions)
+- The project intentionally excludes React frontend work. The API endpoints and documentation in this repo provide the necessary integration points for a React client or other consumers.
+
+7. Phase 5 — Delivery, documentation & tests
+--------------------------------------------
+Summary
+- Purpose: consolidate deliverables and provide reproducible commands and tests for core pipeline components.
+
+Files added
+- docs/final_documentation.md (this document)
+- docs/USAGE.md (concise runbook)
+- tests/test_customer_cleaner.py — small unit test covering cleaning rules
+
+How outputs were obtained (brief)
+- Tests: run pytest -q from repository root; the test validates the cleaner behavior on a synthetic two-row DataFrame.
+- Documentation: this file summarizes the repo state and provides precise commands to reproduce outputs.
+
+Screenshot placeholder
+- docs/screenshots/phase5_test_output.png — pytest output in terminal
+
+Notes
+- CI and environment reproducibility (requirements, Docker, GitHub Actions) were explicitly excluded per project instructions; all work was implemented as code and documentation only.
+
+8. Operational considerations and known issues
+--------------------------------------------
+This section lists design decisions, operational notes and known issues that require your attention before production use.
+
+8.1 Database and ORM type alignment
+- I updated the ORM definition (sql_tables.py) to use Float for MonthlyCharges/TotalCharges. This change ensures numeric aggregation works as expected in queries (e.g., avg(MonthlyCharges)).
+- Local action: if your existing MySQL table main1 has VARCHAR for these columns, either drop and reload main1 using load.py (recommended) or run ALTER TABLE statements to convert the columns to DOUBLE/FLOAT after cleaning the data.
+
+8.2 Table name casing
+- load.py now writes to `main1` (lowercase), which matches the ORM's __tablename__ — previously load.py wrote to "Main1" (capital M) which may create a distinct table on case-sensitive systems. If you have existing data in Main1, consider renaming or migrating.
+
+8.3 routers.py import caveat
+- The original repository included an import line in routers.py: from datetime import datetime,UTC — this import is invalid in many Python environments and will raise ImportError. You previously requested to skip changing it — if you want the API to run reliably across environments, change to:
+  from datetime import datetime, timezone
+  and use datetime.now(timezone.utc).isoformat() where needed.
+
+8.4 Model artifact compatibility
+- routers.py attempts to load .pkl / .joblib artifacts. Pickled artifacts must be compatible with your local scikit-learn / Python version. For stability, prefer joblib and keep a model card with scikit-learn version.
+
+8.5 Secrets and logging
+- The project contains an absolute path to a log file in main.py and a hard-coded API_KEY for simple authorization. For production usage, migrate secrets (API keys, DB credentials) to a secure store or environment variables and avoid absolute Windows-only paths.
+
+9. How to reproduce outputs (commands)
+-------------------------------------
+Assuming you run commands at the repository root and you have the same local paths and MySQL running as original scripts:
+
+1) Clean data and write cleaned CSV
+   python scripts/customer_cleaner.py --input "WA_Fn-UseC_-Telco-Customer-Churn(in).csv" --output data/cleaned_customer.csv
+
+2) Load staging table main1
+   python load.py
+
+3) Generate or load features
+   python Load_Features.py
+
+4) Start API
+   uvicorn main:app --reload
+
+5) Run cleaner unit test
+   pytest -q
+
+6) Example scoring request (curl)
+   curl -X POST "http://127.0.0.1:8000/customer/predict_churn" \
+     -H "Content-Type: application/json" -H "x-api-key: Aniruddh" \
+     -d '{"tenure":12,"monthly_charges":70.0,"contract":"Month-to-month","service_count":3}'
+
+10. Appendices
+--------------
+A. File map (high-level)
+- scripts/customer_cleaner.py — data cleaner
+- load.py — ingestion to main1 (modified)
+- Load_Features.py — ingestion of customer_features
+- DataEngineering.ipynb, DataAnalyzing.ipynb, FeatureEngineering.ipynb, ML_prep.ipynb, UsingModel.ipynb — notebooks
+- routers.py, main.py — FastAPI app and routes
+- sql_tables.py — ORM models (MonthlyCharges/TotalCharges use Float)
+- models/ — model artifacts
+- docs/ — documentation and screenshots placeholders
+
+B. Change log highlights (branch ci-lab/finalize)
+- Added scripts/customer_cleaner.py and tests/test_customer_cleaner.py
+- Updated load.py to use the cleaner and write to `main1`
+- Updated Load_Features.py to ensure numeric TotalCharges and write to `customer_features`
+- Updated routers.py to support loading .pkl and .joblib model artifacts
+- Changed MonthlyCharges and TotalCharges to Float in sql_tables.py
+- Added docs and placeholder screenshots; created this comprehensive PDF report
+
+C. Next recommended actions (priority)
+1) Replace screenshot placeholders in docs/screenshots/ with real images and re-generate PDF if desired.
+2) Fix the small routers.py import (datetime/UTC) so the API imports cleanly in your environment.
+3) (Optional) Add a reproducible scripts/train.py and a small models/sample_model.joblib for deterministic local scoring.
+4) Consider adding a model card (models/MODEL_CARD.md) and versioning for any deployed model.
+
+End of report
