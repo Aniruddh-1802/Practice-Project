@@ -5,6 +5,9 @@ from datetime import datetime,UTC
 from sql_connection import get_db
 from sql_tables import staging_customer_raw, CustomerValidator, CustomerResponse, CustomerUpdate,HighRiskCustomerResponse,CustomerFeaturesResponse,CustomerFeatures, ChurnPredictionRequest
 
+import joblib
+import os
+
 API_KEY = "Aniruddh"
 
 async def verify_api_key(x_api_key: str = Header(None)):
@@ -24,6 +27,19 @@ router = APIRouter(
     tags=["Customers"],
     dependencies = [Depends(verify_api_key)]
 )
+
+# Model loader
+MODEL_PATH = os.path.join(os.path.dirname(__file__), "models", "sample_model.joblib")
+_model = None
+
+def load_model():
+    global _model
+    if _model is None and os.path.exists(MODEL_PATH):
+        try:
+            _model = joblib.load(MODEL_PATH)
+        except Exception:
+            _model = None
+    return _model
 
 
 @router.get("/churn/summary")
@@ -79,6 +95,26 @@ def create_customer(customer: CustomerValidator, db: Session = Depends(get_db)):
 
 @router.post("/predict_churn")
 def predict_churn(request: ChurnPredictionRequest, db: Session = Depends(get_db)):
+    """Try to load a model from models/sample_model.joblib and predict. If not available, return the existing stub result."""
+    model = load_model()
+
+    # Prepare features consistent with training (tenure, monthly_charges, contract_flag, service_count)
+    contract_flag = 1 if str(request.contract).lower().startswith("month") else 0
+    features = [request.tenure, request.monthly_charges, contract_flag, request.service_count]
+
+    if model is not None:
+        try:
+            if hasattr(model, "predict_proba"):
+                proba = float(model.predict_proba([features])[0][1])
+            else:
+                proba = float(model.predict([features])[0])
+            prediction = "Likely to churn" if proba >= 0.5 else "Unlikely to churn"
+            return {"customer_id": "N/A", "risk_score": round(proba, 4), "prediction": prediction}
+        except Exception:
+            # if model fails, fall back to stub
+            pass
+
+    # existing stub fallback
     return  {"customer_id": "N/A", "risk_score": 
     0.78, "prediction": "Likely to churn", "note": "stub — real model in ML4"} 
 
