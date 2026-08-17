@@ -1,6 +1,6 @@
 from datetime import date
 from pydantic import BaseModel
-from sqlalchemy import Column, Integer, String
+from sqlalchemy import Column, Integer, String, Float
 from sqlalchemy.orm import declarative_base
 
 Base = declarative_base()
@@ -27,8 +27,8 @@ class staging_customer_raw(Base):
     Contract = Column(String(20))
     PaperlessBilling = Column(String(20))
     PaymentMethod = Column(String(20))
-    MonthlyCharges = Column(String(20))
-    TotalCharges = Column(String(20))
+    MonthlyCharges = Column(Float)
+    TotalCharges = Column(Float)
     Churn = Column(String(20))
     
  
@@ -53,7 +53,7 @@ class CustomerValidator(BaseModel):
     PaperlessBilling : str
     PaymentMethod : str
     MonthlyCharges : float
-    TotalCharges : str
+    TotalCharges : float
     Churn : str
     
     class Config:
@@ -79,7 +79,7 @@ class CustomerUpdate(BaseModel):
     PaperlessBilling : str | None = None 
     PaymentMethod : str | None = None 
     MonthlyCharges : float | None = None 
-    TotalCharges : str | None = None 
+    TotalCharges : float | None = None 
     Churn : str | None = None 
     
     class Config:
@@ -107,7 +107,7 @@ class CustomerResponse(BaseModel):
     PaperlessBilling : str
     PaymentMethod : str
     MonthlyCharges : float
-    TotalCharges : str
+    TotalCharges : float
     Churn : str
 
     class Config:
@@ -145,8 +145,8 @@ class CustomerFeatures(Base):
     Contract = Column(String(20))
     PaperlessBilling = Column(String(20))
     PaymentMethod = Column(String(20))
-    MonthlyCharges = Column(String(20))
-    TotalCharges = Column(String(20))
+    MonthlyCharges = Column(Float)
+    TotalCharges = Column(Float)
     Churn = Column(String(20))
     churn_flag = Column(Integer)
     tenure_bucket = Column(String(10))
